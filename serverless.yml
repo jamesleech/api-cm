@@ -1,0 +1,102 @@
+service: cm
+
+plugins:
+  - serverless-webpack
+  - serverless-dynamodb-local
+  - serverless-offline
+#  - serverless-iam-roles-per-function
+  - serverless-prune-plugin
+#  - serverless-plugin-optimize
+
+custom:
+  prefix: '${self:provider.stage}-${self:service}'
+  webpack:
+    webpackConfig: ./webpack.config.js
+    includeModules: true
+  serverless-iam-roles-per-function:
+    defaultInherit: true # Each function will inherit the service level roles too.
+  prune:
+    automatic: true
+    number: 3
+  tableName: '${self:custom.prefix}-table'
+  dynamodb:
+    stages:
+      - test
+      - local
+    start:
+      inMemory: true
+      migrate: true
+      port: 8000
+      sharedDb: true
+      convertEmptyValues: true
+
+provider:
+  name: aws
+  runtime: nodejs14.x
+  stage: ${opt:stage, 'local'}
+  region: ${opt:region, 'ap-southeast-2'}
+  apiGateway:
+    minimumCompressionSize: 1024 # Enable gzip compression for responses > 1 KB
+  environment:
+    DEBUG: '*'
+    NODE_ENV: ${self:provider.stage}
+    AWS_NODEJS_CONNECTION_REUSE_ENABLED: 1
+    DYNAMODB_TABLE: '${self:custom.tableName}'
+  lambdaHashingVersion: "20201221"
+  tracing:
+    lambda: true
+  iam:
+    role:
+      statements:
+        - Effect: Allow
+          Action:
+            - xray:PutTraceSegments
+            - xray:PutTelemetryRecords
+          Resource: "*"
+        - Effect: Allow
+          Action:
+            - dynamodb:Query
+            - dynamodb:GetItem
+            - dynamodb:PutItem
+            - dynamodb:UpdateItem
+            - dynamodb:BatchWriteItem
+          Resource:
+            - Fn::GetAtt: [ DynamoDBTable, Arn ]
+
+# Importing resources from external yml can keep things cleaner
+resources:
+  - ${file(resources/dynamodb.yml)}
+#  - ${file(resources/sqs.yml)}
+#  - ${file(resources/sns.yml)}
+
+functions:
+  parseMarkup:
+    handler: src/functions/parse/handler.main
+    timeout: 600
+    events:
+      - schedule: rate(20 minutes)
+
+  getSites:
+    handler: src/functions/getSites/handler.main
+    timeout: 35
+    events:
+      - httpApi:
+          method: GET
+          path: /sites
+          cors:
+            origins:
+              - "http://localhost:3000"
+            headers:
+              - Accept
+              - Origin
+              - DNT
+              - User-Agent
+              - Referer
+              - Content-Type
+              - X-Amz-Date
+              - x-amz-date
+              - Authorization
+              - X-Api-Key
+              - X-Amz-Security-Token
+
+
